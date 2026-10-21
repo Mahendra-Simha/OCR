@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scanned PDF OCR Converter</title>
+  <link rel="icon" href="data:;base64,iVBORw0KGgo=">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Library required to generate real .DOCX files directly in the browser -->
+  <script src="https://unpkg.com/docx@7.8.2/build/index.js"></script>
+</head>
+
+<body class="bg-slate-50 min-h-screen text-slate-800 p-6 pb-16 flex flex-col relative">
+
+  <!-- ==================== CUSTOM MODAL ==================== -->
+  <div id="customModal"
+    class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm hidden flex items-center justify-center z-50 transition-opacity">
+    <div class="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 overflow-hidden transform transition-all">
+      <div class="p-6">
+        <div class="flex items-center gap-3 mb-3">
+          <div id="modalIcon" class="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center"></div>
+          <h3 id="modalTitle" class="text-xl font-bold text-slate-800">Title</h3>
+        </div>
+        <p id="modalMessage" class="text-slate-600 text-sm leading-relaxed pl-13"></p>
+      </div>
+      <div class="bg-slate-50 px-6 py-4 border-t border-slate-100 flex justify-end">
+        <button onclick="closeModal()"
+          class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-6 py-2 rounded-md font-semibold shadow-sm transition">
+          OK
+        </button>
+      </div>
+    </div>
+  </div>
+  <!-- ====================================================== -->
+
+  <!-- Main Content Wrapper (Flex-grow keeps footer at bottom) -->
+  <div class="flex-grow max-w-4xl w-full mx-auto space-y-6">
+
+    <!-- Header -->
+    <header class="text-center space-y-2 mt-8">
+      <h1 class="text-3xl font-bold text-slate-900">Scanned PDF Text Extractor</h1>
+      <p class="text-slate-600">Upload your scanned PDF to extract editable text instantaneously.</p>
+    </header>
+
+    <!-- Upload Card -->
+    <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+      <div id="dropZone" onclick="document.getElementById('fileInput').click()"
+        class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center cursor-pointer hover:border-indigo-500 hover:bg-slate-50 transition">
+        <input type="file" id="fileInput" accept=".pdf" class="hidden" onchange="handleFileSelect()">
+        <p class="text-slate-600 font-medium">Click to browse or drop your PDF here</p>
+        <p class="text-xs text-slate-400 mt-2">Only scanned PDF documents supported</p>
+      </div>
+
+      <div id="fileInfo" class="mt-4 hidden flex items-center justify-between bg-slate-100 p-3 rounded-md">
+        <span id="fileName" class="text-sm font-medium text-slate-700 truncate mr-4"></span>
+        <button id="processBtn" onclick="processPDF()"
+          class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-4 py-2 rounded-md font-medium shadow-sm transition whitespace-nowrap">
+          Extract Text
+        </button>
+      </div>
+    </div>
+
+    <!-- Tailwind Progress Bar & Stop Button -->
+    <div id="progress-container" class="hidden bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+      <div class="flex justify-between mb-2">
+        <span class="text-sm font-semibold text-indigo-700" id="progress-text">Preparing document...</span>
+      </div>
+      <div class="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
+        <div id="progress-bar" class="bg-indigo-600 h-2.5 rounded-full transition-all duration-300" style="width: 0%">
+        </div>
+      </div>
+      <!-- Stop Button -->
+      <div class="mt-5 text-center">
+        <button id="cancelBtn" onclick="cancelExtraction()"
+          class="bg-red-500 hover:bg-red-600 text-white text-sm font-semibold px-6 py-2 rounded-md shadow-sm transition duration-200">
+          Stop Extraction
+        </button>
+      </div>
+    </div>
+
+    <!-- Result Card -->
+    <div id="resultCard" class="hidden bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+        <h2 class="text-lg font-semibold text-slate-800">Extracted Text</h2>
+
+        <!-- Action Buttons -->
+        <div class="flex items-center gap-2">
+          <button onclick="copyToClipboard()" id="copyBtn"
+            class="bg-slate-800 hover:bg-slate-900 text-white text-xs px-3 py-2 rounded-md font-medium shadow-sm transition flex items-center gap-1">
+            📋 Copy
+          </button>
+          <button onclick="downloadText('txt')"
+            class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-2 rounded-md font-medium shadow-sm transition flex items-center gap-1">
+            ⬇️ .TXT
+          </button>
+          <button onclick="downloadText('docx')"
+            class="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-2 rounded-md font-medium shadow-sm transition flex items-center gap-1">
+            ⬇️ .DOCX
+          </button>
+        </div>
+      </div>
+
+      <!-- Find Feature -->
+      <div class="flex gap-2 mb-2">
+        <input type="text" id="search-input" placeholder="Find a word..." oninput="findWordInText()"
+          class="px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full sm:w-64 transition">
+        <button onclick="findWordInText()"
+          class="bg-slate-100 hover:bg-slate-200 text-slate-800 text-sm px-4 py-2 rounded-md font-medium transition border border-slate-300">
+          Find
+        </button>
+      </div>
+
+      <!-- Editable Output Area (Layered for Highlighting) -->
+      <div class="relative w-full rounded-md shadow-inner border border-slate-200 bg-slate-50 overflow-hidden"
+        style="height: 400px;">
+
+        <!-- Background Layer (Holds the yellow highlights) -->
+        <div id="highlightBackdrop"
+          class="absolute inset-0 p-4 font-mono text-sm whitespace-pre-wrap break-words text-transparent pointer-events-none overflow-hidden">
+        </div>
+
+        <!-- Foreground Textarea (Transparent, where you actually type) -->
+        <textarea id="extractedText" onscroll="syncScroll()" oninput="syncText()" spellcheck="false"
+          class="absolute inset-0 w-full h-full p-4 font-mono text-sm bg-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none m-0 border-none whitespace-pre-wrap break-words"></textarea>
+      </div>
+
+    </div>
+  </div> <!-- Closing tag for flex-grow wrapper -->
+
+  <!-- Sticky Footer outside of all boxes -->
+  <footer
+    class="fixed bottom-0 left-0 w-full bg-slate-50/90 backdrop-blur-sm border-t border-slate-200 text-center text-sm font-medium text-slate-500 py-3 z-40">
+    Developed by Mahendra Simha R S
+  </footer>
+
+  <script>
+    // Global variable to track the active task for cancellation
+    let currentTaskId = null;
+
+    // ==================== CUSTOM MODAL LOGIC ====================
+    function showModal(title, message, type = 'info') {
+      const modal = document.getElementById('customModal');
+      const titleEl = document.getElementById('modalTitle');
+      const messageEl = document.getElementById('modalMessage');
+      const iconEl = document.getElementById('modalIcon');
+
+      titleEl.innerText = title;
+      messageEl.innerText = message;
+
+      iconEl.className = "flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center";
+
+      if (type === 'error') {
+        iconEl.classList.add('bg-red-100', 'text-red-600');
+        iconEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>`;
+      } else if (type === 'warning') {
+        iconEl.classList.add('bg-amber-100', 'text-amber-600');
+        iconEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>`;
+      } else {
+        iconEl.classList.add('bg-indigo-100', 'text-indigo-600');
+        iconEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>`;
+      }
+
+      modal.classList.remove('hidden');
+    }
+
+    function closeModal() {
+      document.getElementById('customModal').classList.add('hidden');
+    }
+    // ============================================================
+
+    function handleFileSelect() {
+      const fileInput = document.getElementById('fileInput');
+      if (fileInput.files.length > 0) {
+        document.getElementById('fileName').innerText = fileInput.files[0].name;
+        document.getElementById('fileInfo').classList.remove('hidden');
+      }
+    }
+
+    async function processPDF() {
+      const fileInput = document.getElementById('fileInput');
+
+      if (fileInput.files.length === 0) {
+        return showModal("Action Required", "Please select a PDF file first before trying to extract text.", "warning");
+      }
+
+      const formData = new FormData();
+      formData.append('file', fileInput.files[0]);
+
+      document.getElementById('fileInfo').classList.add('hidden');
+      document.getElementById('progress-container').classList.remove('hidden');
+      document.getElementById('resultCard').classList.add('hidden');
+
+      // Reset Stop Button styling in case it was clicked previously
+      const cancelBtn = document.getElementById('cancelBtn');
+      cancelBtn.innerText = "Stop Extraction";
+      cancelBtn.disabled = false;
+      cancelBtn.className = "bg-red-500 hover:bg-red-600 text-white text-sm font-semibold px-6 py-2 rounded-md shadow-sm transition duration-200";
+
+      try {
+        const response = await fetch('/upload', { method: 'POST', body: formData });
+        const data = await response.json();
+
+        currentTaskId = data.task_id; // Track ID for cancellation
+        pollServerForProgress(data.task_id);
+      } catch (error) {
+        document.getElementById('progress-container').classList.add('hidden');
+        showModal("Connection Error", "Failed to connect to the backend server. Make sure Uvicorn is running.", "error");
+      }
+    }
+
+    // ==================== CANCELLATION LOGIC ====================
+    async function cancelExtraction() {
+      if (!currentTaskId) return;
+
+      const cancelBtn = document.getElementById('cancelBtn');
+      cancelBtn.innerText = "Stopping...";
+      cancelBtn.disabled = true;
+      cancelBtn.className = "bg-slate-400 text-white text-sm font-semibold px-6 py-2 rounded-md shadow-sm cursor-not-allowed";
+
+      try {
+        await fetch(`/cancel/${currentTaskId}`, { method: 'POST' });
+      } catch (error) {
+        console.error("Error attempting to cancel:", error);
+      }
+    }
+    // ============================================================
+
+    async function pollServerForProgress(taskId) {
+      const checkInterval = setInterval(async () => {
+        const res = await fetch(`/status/${taskId}`);
+        const data = await res.json();
+
+        if (data.status === 'processing') {
+          const percentage = Math.round((data.progress / data.total) * 100) || 0;
+
+          document.getElementById('progress-text').innerText = `${data.progress} out of ${data.total} is processed`;
+          document.getElementById('progress-bar').style.width = `${percentage}%`;
+
+        } else if (data.status === 'completed' || data.status === 'cancelled') {
+          clearInterval(checkInterval);
+          document.getElementById('progress-container').classList.add('hidden');
+
+          document.getElementById('resultCard').classList.remove('hidden');
+          document.getElementById('extractedText').value = data.text;
+          syncText();
+
+          if (data.status === 'cancelled') {
+            showModal("Extraction Stopped", "The extraction was stopped. Showing partially extracted text up to the point of cancellation.", "warning");
+          }
+
+          currentTaskId = null; // Reset tracker
+
+        } else if (data.status === 'failed') {
+          clearInterval(checkInterval);
+          document.getElementById('progress-container').classList.add('hidden');
+          showModal("Extraction Failed", data.error, "error");
+          currentTaskId = null; // Reset tracker
+        }
+      }, 2000);
+    }
+
+    function syncScroll() {
+      document.getElementById('highlightBackdrop').scrollTop = document.getElementById('extractedText').scrollTop;
+    }
+
+    // Re-runs the highlight if the user manually types or edits the extracted text
+    function syncText() {
+      findWordInText();
+    }
+
+    // Safely handles special characters so they don't break the HTML backdrop
+    function escapeHtml(text) {
+      return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    function findWordInText() {
+      const searchInput = document.getElementById("search-input");
+      const textarea = document.getElementById("extractedText");
+      const backdrop = document.getElementById("highlightBackdrop");
+
+      const searchWord = searchInput.value;
+      const text = textarea.value;
+
+      // If search box is empty, clear highlights and borders
+      if (!searchWord) {
+        backdrop.innerHTML = escapeHtml(text);
+        searchInput.style.borderColor = "";
+        searchInput.style.outlineColor = "";
+        return;
+      }
+
+      // Create a safe regex to find the word, ignoring case
+      const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`(${escapeRegExp(searchWord)})`, 'gi');
+
+      if (regex.test(text)) {
+        // MATCH FOUND: Green border and add yellow highlights to the backdrop
+        searchInput.style.borderColor = "#22c55e";
+        searchInput.style.outlineColor = "#22c55e";
+
+        // Wrap the matched words in a <mark> tag for the background layer
+        const highlightedHTML = escapeHtml(text).replace(regex, `<mark class="bg-yellow-300 text-transparent rounded-sm">$1</mark>`);
+        backdrop.innerHTML = highlightedHTML;
+
+        // Auto-scroll to the first match
+        const startIndex = text.toLowerCase().indexOf(searchWord.toLowerCase());
+        const textUpToMatch = text.substring(0, startIndex);
+        const lineBreaks = (textUpToMatch.match(/\n/g) || []).length;
+        const lineHeight = parseInt(window.getComputedStyle(textarea).lineHeight) || 20;
+
+        textarea.scrollTop = lineBreaks * lineHeight;
+        backdrop.scrollTop = textarea.scrollTop; // Sync backdrop scroll
+
+      } else {
+        // NOT FOUND: Red border and clear highlights
+        searchInput.style.borderColor = "#ef4444";
+        searchInput.style.outlineColor = "#ef4444";
+        backdrop.innerHTML = escapeHtml(text);
+      }
+    }
+
+    function copyToClipboard() {
+      const text = document.getElementById("extractedText").value;
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById("copyBtn");
+        const originalHTML = btn.innerHTML;
+        btn.innerHTML = "✅ Copied!";
+        setTimeout(() => btn.innerHTML = originalHTML, 2000);
+      });
+    }
+
+    function downloadText(format) {
+      const text = document.getElementById("extractedText").value;
+
+      if (format === 'txt') {
+        const blob = new Blob([text], { type: "text/plain" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = `extracted_text.txt`;
+        a.click();
+      }
+      else if (format === 'docx') {
+        const textLines = text.split('\n');
+        const paragraphs = textLines.map(line => {
+          return new docx.Paragraph({
+            children: [new docx.TextRun(line)]
+          });
+        });
+
+        const doc = new docx.Document({
+          sections: [{
+            properties: {},
+            children: paragraphs
+          }]
+        });
+
+        docx.Packer.toBlob(doc).then(blob => {
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = `extracted_text.docx`;
+          a.click();
+        });
+      }
+    }
+  </script>
+</body>
+
+</html>
